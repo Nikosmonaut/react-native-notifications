@@ -11,11 +11,31 @@ public class PushNotificationProps {
     }
 
     public String getTitle() {
-        return getBundleStringFirstNotNull("gcm.notification.title", "title");
+        return mBundle.getString("title");
     }
 
     public String getBody() {
-        return getBundleStringFirstNotNull("gcm.notification.body", "body");
+        return mBundle.getString("body");
+    }
+
+    public String getAction() {
+        return mBundle.getString("action");
+    }
+
+    public String getInteractionUserId() {
+        return mBundle.getString("interactionUserID");
+    }
+
+    public String contentId() {
+        return mBundle.getString("contentID");
+    }
+
+    public String getContentType() {
+        return mBundle.getString("contentType");
+    }
+
+    public String getIconUrl() {
+        return mBundle.getString("iconUrl");
     }
 
     public Bundle asBundle() {
@@ -37,10 +57,5 @@ public class PushNotificationProps {
 
     protected PushNotificationProps copy() {
         return new PushNotificationProps((Bundle) mBundle.clone());
-    }
-
-    private String getBundleStringFirstNotNull(String key1, String key2) {
-        String result = mBundle.getString(key1);
-        return result == null ? mBundle.getString(key2) : result;
     }
 }

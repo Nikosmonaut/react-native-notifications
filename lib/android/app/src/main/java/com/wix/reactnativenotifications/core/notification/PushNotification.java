@@ -1,14 +1,24 @@
 package com.wix.reactnativenotifications.core.notification;
 
 import android.app.Notification;
-import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 
+import com.facebook.common.executors.UiThreadImmediateExecutorService;
+import com.facebook.common.references.CloseableReference;
+import com.facebook.datasource.DataSource;
+import com.facebook.drawee.backends.pipeline.Fresco;
+import com.facebook.imagepipeline.core.ImagePipeline;
+import com.facebook.imagepipeline.datasource.BaseBitmapDataSubscriber;
+import com.facebook.imagepipeline.image.CloseableImage;
+import com.facebook.imagepipeline.request.ImageRequest;
 import com.facebook.react.bridge.ReactContext;
 import com.wix.reactnativenotifications.core.AppLaunchHelper;
 import com.wix.reactnativenotifications.core.AppLifecycleFacade;
@@ -60,7 +70,7 @@ public class PushNotification implements IPushNotification {
     @Override
     public void onReceived() throws InvalidNotificationException {
         if (!mAppLifecycleFacade.isAppVisible()) {
-            postNotification(null);
+            postNotification();
         }
         notifyReceivedToJS();
     }
@@ -72,8 +82,8 @@ public class PushNotification implements IPushNotification {
     }
 
     @Override
-    public int onPostRequest(Integer notificationId) {
-        return postNotification(notificationId);
+    public void onPostRequest(Integer notificationId) {
+        postNotification();
     }
 
     @Override
@@ -81,10 +91,41 @@ public class PushNotification implements IPushNotification {
         return mNotificationProps.copy();
     }
 
-    protected int postNotification(Integer notificationId) {
+    protected void postNotification() {
         final PendingIntent pendingIntent = getCTAPendingIntent();
-        final Notification notification = buildNotification(pendingIntent);
-        return postNotification(notification, notificationId);
+        final Notification.Builder notification = getNotificationBuilder(pendingIntent);
+
+        // It should be refactored into a separate method with a callback.
+        // But the author if this code does not now for now how to do it in java
+        ImageRequest imageRequest = ImageRequest.fromUri(mNotificationProps.getIconUrl());
+        ImagePipeline imagePipeline = Fresco.getImagePipeline();
+        DataSource<CloseableReference<CloseableImage>> dataSource = imagePipeline.fetchDecodedImage(imageRequest, null);
+
+        dataSource.subscribe(
+                new BaseBitmapDataSubscriber() {
+                    @Override
+                    protected void onNewResultImpl(Bitmap bitmap) {
+                        Log.d("MON_TAG", mNotificationProps.getIconUrl());
+                        Log.d("MON_TAG", "not error");
+
+                        final Notification.Builder notification = getNotificationBuilder(pendingIntent);
+
+                        notification.setLargeIcon(bitmap);
+
+                        postNotification(notification.build(), null);
+                    }
+
+                    @Override
+                    protected void onFailureImpl(DataSource<CloseableReference<CloseableImage>> dataSource) {
+                        Log.d("MON_TAG", mNotificationProps.getIconUrl());
+                        Log.d("MON_TAG", "error");
+                        final Notification notification = getNotificationBuilder(pendingIntent).build();
+
+                        postNotification(notification, null);
+                    }
+                },
+                UiThreadImmediateExecutorService.getInstance()
+        );
     }
 
     protected void digestNotification() {
@@ -135,38 +176,56 @@ public class PushNotification implements IPushNotification {
         return NotificationIntentAdapter.createPendingNotificationIntent(mContext, cta, mNotificationProps);
     }
 
-    protected Notification buildNotification(PendingIntent intent) {
-        return getNotificationBuilder(intent).build();
-    }
-
     protected Notification.Builder getNotificationBuilder(PendingIntent intent) {
-
-        String CHANNEL_ID = "channel_01";
-        String CHANNEL_NAME = "Channel Name";
-
         final Notification.Builder notification = new Notification.Builder(mContext)
                 .setContentTitle(mNotificationProps.getTitle())
-                .setContentText(mNotificationProps.getBody())
                 .setContentIntent(intent)
                 .setDefaults(Notification.DEFAULT_ALL)
                 .setAutoCancel(true);
 
         setUpIcon(notification);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID,
-                    CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_DEFAULT);
-            final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-            notificationManager.createNotificationChannel(channel);
-            notification.setChannelId(CHANNEL_ID);
-        }
+        setUpChannel(notification);
+        setUpBody(notification);
 
         return notification;
     }
 
+    private void setUpBody(Notification.Builder notification) {
+        Resources resources = mContext.getResources();
+        String action = mNotificationProps.getAction();
+        String body = mNotificationProps.getBody();
+
+        if (body == null && action.equals("followed")) {
+            int bodyResourceId = getAppResourceId("notifications_followed", "string");
+            body = resources.getString(bodyResourceId);
+        } else if (body == null && action.equals("commented")) {
+            int bodyResourceId = getAppResourceId("notifications_commented", "string");
+            body = resources.getString(bodyResourceId);
+        }
+
+        notification.setContentText(body);
+    }
+
+    private void setUpChannel(Notification.Builder notification) {
+        Resources resources = mContext.getResources();
+        String action = mNotificationProps.getAction();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            int channelResourceId = getAppResourceId("channel_default_id", "string");
+            String channelId = resources.getString(channelResourceId);
+
+            if (action == "followed") {
+                channelResourceId = getAppResourceId("channel_followed_id", "string");
+                channelId = resources.getString(channelResourceId);
+            } else if (action == "commented") {
+                channelResourceId = getAppResourceId("channel_comments_id", "string");
+                channelId = resources.getString(channelResourceId);
+            }
+            notification.setChannelId(channelId);
+        }
+    }
+
     private void setUpIcon(Notification.Builder notification) {
-        int iconResId = getAppResourceId("notification_icon", "drawable");
+        int iconResId = getAppResourceId("ic_notification", "drawable");
         if (iconResId != 0) {
             notification.setSmallIcon(iconResId);
         } else {
@@ -177,7 +236,7 @@ public class PushNotification implements IPushNotification {
     }
 
     private void setUpIconColor(Notification.Builder notification) {
-        int colorResID = getAppResourceId("colorAccent", "color");
+        int colorResID = getAppResourceId("appMain", "color");
         if (colorResID != 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             int color = mContext.getResources().getColor(colorResID);
             notification.setColor(color);
