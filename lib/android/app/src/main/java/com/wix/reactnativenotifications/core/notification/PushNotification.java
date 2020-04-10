@@ -38,6 +38,8 @@ import static com.wix.reactnativenotifications.Defs.NOTIFICATION_OPENED_EVENT_NA
 import static com.wix.reactnativenotifications.Defs.NOTIFICATION_RECEIVED_EVENT_NAME;
 
 public class PushNotification implements IPushNotification {
+    private static final String COMMENTED_ACTION = "commented";
+    private static final String FOLLOWED_ACTION = "followed";
 
     final protected Context mContext;
     final protected AppLifecycleFacade mAppLifecycleFacade;
@@ -97,9 +99,20 @@ public class PushNotification implements IPushNotification {
     }
 
     protected void postNotification() {
+        final PendingIntent pendingIntent = getCTAPendingIntent();
+        final Notification.Builder notification = getNotificationBuilder(pendingIntent);
+
+        if (mNotificationProps.getIconUrl() == null) {
+            postNotification(notification.build(), null);
+
+            return;
+        }
+
         // It should be refactored into a separate method with a callback.
         // But the author if this code does not now for now how to do it in java
-        Fresco.initialize(mContext);
+        if (!Fresco.hasBeenInitialized()) {
+            Fresco.initialize(mContext);
+        }
         final ImagePipeline imagePipeline = Fresco.getImagePipeline();
         final ImageRequest imageRequest = ImageRequest.fromUri(mNotificationProps.getIconUrl());
         final DataSource<CloseableReference<CloseableImage>> dataSource = imagePipeline.fetchDecodedImage(imageRequest, mContext);
@@ -108,8 +121,6 @@ public class PushNotification implements IPushNotification {
                 new BaseBitmapDataSubscriber() {
                     @Override
                     protected void onNewResultImpl(Bitmap bitmap) {
-                        final PendingIntent pendingIntent = getCTAPendingIntent();
-                        final Notification.Builder notification = getNotificationBuilder(pendingIntent);
                         Bitmap circleBitmap = getCircleBitmap(bitmap);
                         notification.setLargeIcon(circleBitmap);
 
@@ -118,9 +129,6 @@ public class PushNotification implements IPushNotification {
 
                     @Override
                     protected void onFailureImpl(DataSource<CloseableReference<CloseableImage>> dataSource) {
-                        final PendingIntent pendingIntent = getCTAPendingIntent();
-                        final Notification.Builder notification = getNotificationBuilder(pendingIntent);
-
                         postNotification(notification.build(), null);
                     }
                 },
@@ -183,6 +191,7 @@ public class PushNotification implements IPushNotification {
                 .setDefaults(Notification.DEFAULT_ALL)
                 .setAutoCancel(true);
 
+        setUpGroup(notification, false);
         setUpIcon(notification);
         setUpChannel(notification);
         setUpBody(notification);
@@ -190,55 +199,31 @@ public class PushNotification implements IPushNotification {
         return notification;
     }
 
-    public static Bitmap getCircleBitmap(Bitmap bitmap) {
-        Bitmap output;
-        Rect srcRect, dstRect;
-        float r;
-        final int width = bitmap.getWidth();
-        final int height = bitmap.getHeight();
+    private void setUpGroup(Notification.Builder notification, Boolean isSummary) {
+        String action = mNotificationProps.getAction();
 
-        if (width > height) {
-            output = Bitmap.createBitmap(height, height, Bitmap.Config.ARGB_8888);
-            int left = (width - height) / 2;
-            int right = left + height;
-            srcRect = new Rect(left, 0, right, height);
-            dstRect = new Rect(0, 0, height, height);
-            r = height / 2;
-        } else {
-            output = Bitmap.createBitmap(width, width, Bitmap.Config.ARGB_8888);
-            int top = (height - width) / 2;
-            int bottom = top + width;
-            srcRect = new Rect(0, top, width, bottom);
-            dstRect = new Rect(0, 0, width, width);
-            r = width / 2;
+        // Group notifications by theme
+        // All following notifications together
+        // Group comments by post
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+            if (action.equals(FOLLOWED_ACTION)) {
+                notification.setGroup("followed");
+            } else if (action.equals(COMMENTED_ACTION)) {
+                notification.setGroup(mNotificationProps.getContentID());
+            }
+            notification.setGroupSummary(isSummary);
         }
-
-        Canvas canvas = new Canvas(output);
-
-        final int color = 0xff424242;
-        final Paint paint = new Paint();
-
-        paint.setAntiAlias(true);
-        canvas.drawARGB(0, 0, 0, 0);
-        paint.setColor(color);
-        canvas.drawCircle(r, r, r, paint);
-        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
-        canvas.drawBitmap(bitmap, srcRect, dstRect, paint);
-
-        bitmap.recycle();
-
-        return output;
     }
 
     private void setUpBody(Notification.Builder notification) {
         Resources resources = mContext.getResources();
         String action = mNotificationProps.getAction();
-        String body = mNotificationProps.getBody();
+        String body = null;
 
-        if (body == null && action.equals("followed")) {
+        if (action.equals(FOLLOWED_ACTION)) {
             int bodyResourceId = getAppResourceId("notifications_followed", "string");
             body = resources.getString(bodyResourceId);
-        } else if (body == null && action.equals("commented")) {
+        } else if (action.equals(COMMENTED_ACTION)) {
             int bodyResourceId = getAppResourceId("notifications_commented", "string");
             body = resources.getString(bodyResourceId);
         }
@@ -253,10 +238,10 @@ public class PushNotification implements IPushNotification {
             int channelResourceId = getAppResourceId("channel_default_id", "string");
             String channelId = resources.getString(channelResourceId);
 
-            if (action == "followed") {
-                channelResourceId = getAppResourceId("channel_followed_id", "string");
+            if (action.equals(FOLLOWED_ACTION)) {
+                channelResourceId = getAppResourceId("channel_followers_id", "string");
                 channelId = resources.getString(channelResourceId);
-            } else if (action == "commented") {
+            } else if (action.equals(COMMENTED_ACTION)) {
                 channelResourceId = getAppResourceId("channel_comments_id", "string");
                 channelId = resources.getString(channelResourceId);
             }
@@ -283,6 +268,38 @@ public class PushNotification implements IPushNotification {
         }
     }
 
+    public static Bitmap getCircleBitmap(Bitmap bitmap) {
+        Bitmap output;
+
+        if (bitmap.getWidth() > bitmap.getHeight()) {
+            output = Bitmap.createBitmap(bitmap.getHeight(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        } else {
+            output = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getWidth(), Bitmap.Config.ARGB_8888);
+        }
+
+        Canvas canvas = new Canvas(output);
+
+        final int color = 0xff424242;
+        final Paint paint = new Paint();
+        final Rect rect = new Rect(0, 0, bitmap.getWidth(), bitmap.getHeight());
+
+        float r = 0;
+
+        if (bitmap.getWidth() > bitmap.getHeight()) {
+            r = bitmap.getHeight() / 2;
+        } else {
+            r = bitmap.getWidth() / 2;
+        }
+
+        paint.setAntiAlias(true);
+        canvas.drawARGB(0, 0, 0, 0);
+        paint.setColor(color);
+        canvas.drawCircle(r, r, r, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(bitmap, rect, rect, paint);
+        return output;
+    }
+
     protected int postNotification(Notification notification, Integer notificationId) {
         int id = notificationId != null ? notificationId : createNotificationId(notification);
         postNotification(id, notification);
@@ -291,6 +308,15 @@ public class PushNotification implements IPushNotification {
 
     protected void postNotification(int id, Notification notification) {
         final NotificationManager notificationManager = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
+        // Keep notifications grouped
+        final Notification.Builder notificationSum = new Notification.Builder(mContext);
+        setUpChannel(notificationSum);
+        setUpGroup(notificationSum, true);
+        setUpIcon(notificationSum);
+        int sumId = mNotificationProps.getContentID().hashCode();
+
+        notificationManager.notify(sumId, notificationSum.build());
         notificationManager.notify(id, notification);
     }
 

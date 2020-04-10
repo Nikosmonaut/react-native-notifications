@@ -14,24 +14,12 @@ public class PushNotificationProps {
         return mBundle.getString("title");
     }
 
-    public String getBody() {
-        return mBundle.getString("body");
-    }
-
     public String getAction() {
         return mBundle.getString("action");
     }
 
-    public String getInteractionUserId() {
-        return mBundle.getString("interactionUserID");
-    }
-
-    public String contentId() {
+    public String getContentID() {
         return mBundle.getString("contentID");
-    }
-
-    public String getContentType() {
-        return mBundle.getString("contentType");
     }
 
     public String getIconUrl() {
