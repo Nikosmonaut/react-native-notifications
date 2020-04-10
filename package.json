@@ -20,7 +20,8 @@
     "interactive-notifications"
   ],
   "files": [
-    "lib/*"
+    "lib/*",
+    "android/*"
   ],
   "main": "lib/dist/index.js",
   "typings": "lib/dist/index.d.ts",
