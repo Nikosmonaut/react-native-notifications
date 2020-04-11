@@ -1,4 +1,3 @@
-import 'proxy-polyfill';
 import { Commands } from './commands/Commands';
 import { NotificationChannel } from './interfaces/NotificationChannel';
 export declare class NotificationsAndroid {
